@@ -9,22 +9,31 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # OIDC trusted publishing (https://docs.npmjs.com/trusted-publishers) —
+      # no NPM_TOKEN needed. npm tightened restrictions on long-lived
+      # automation tokens in 2026, and this is the replacement: npm exchanges
+      # a short-lived, workflow-specific OIDC token for a publish token on
+      # every run, nothing to rotate or leak. Requires npm CLI >= 11.5.1 and
+      # Node >= 22.14.0 in this job specifically (the package's own
+      # engines.node >=20.0.0 is unrelated — that's the minimum for people
+      # *running* the published server, not for publishing it).
       id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-      - run: npm install
+          cache: "npm"
+      - run: npm ci
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
+      - run: npm test
       # Tag must be "v" + package.json's version exactly, e.g. tag v0.1.0 for
       # version "0.1.0" — this is just a sanity check, not something npm
-      # itself enforces (unlike pub.dev's OIDC tag-matching), but publishing
-      # the wrong version because a tag was cut against the wrong commit is
-      # an easy, unrecoverable mistake, so fail fast instead.
+      # itself enforces, but publishing the wrong version because a tag was
+      # cut against the wrong commit is an easy, unrecoverable mistake, so
+      # fail fast instead.
       - run: |
           PKG_VERSION="v$(node -p "require('./package.json').version")"
           TAG_NAME="${GITHUB_REF#refs/tags/}"
@@ -32,10 +41,8 @@ jobs:
             echo "Tag $TAG_NAME does not match package.json version $PKG_VERSION"
             exit 1
           fi
-      # NODE_AUTH_TOKEN is what npm's registry-url setup above wires npm to
-      # actually use — needs an npm automation token with publish access to
-      # the @payghaam org, added as the NPM_TOKEN repo secret. See
-      # RELEASING.md for the one-time setup.
+      # No token in env — npm CLI auto-detects the OIDC environment here and
+      # authenticates via the trusted publisher configured on npmjs.com (see
+      # RELEASING.md). Also generates a provenance attestation automatically,
+      # since this is a public repo publishing a public package.
       - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
