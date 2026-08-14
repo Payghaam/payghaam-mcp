@@ -1,0 +1,41 @@
+name: Publish
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Tag must be "v" + package.json's version exactly, e.g. tag v0.1.0 for
+      # version "0.1.0" — this is just a sanity check, not something npm
+      # itself enforces (unlike pub.dev's OIDC tag-matching), but publishing
+      # the wrong version because a tag was cut against the wrong commit is
+      # an easy, unrecoverable mistake, so fail fast instead.
+      - run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ "$PKG_VERSION" != "$TAG_NAME" ]; then
+            echo "Tag $TAG_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+      # NODE_AUTH_TOKEN is what npm's registry-url setup above wires npm to
+      # actually use — needs an npm automation token with publish access to
+      # the @payghaam org, added as the NPM_TOKEN repo secret. See
+      # RELEASING.md for the one-time setup.
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

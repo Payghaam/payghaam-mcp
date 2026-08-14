@@ -1,0 +1,20 @@
+{
+  "$comment": "Deliberately does not extend tsconfig.base.json. The rest of the monorepo is CommonJS, but this package is published standalone and run by npx, and the MCP ecosystem is ESM — node16 resolution is also what reads the SDK's exports map correctly. Nothing in the repo imports this package, so the divergence stays contained here.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
