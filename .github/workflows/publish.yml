@@ -1,8 +1,20 @@
 name: Publish
+
+# Tag-triggered release to npm via OIDC trusted publishing.
+#
+# "v[0-9]*" requires a digit straight after the v, so "vnext", "v-rc" and
+# "vbeta" do not fire a release — a tag that triggers this by accident publishes
+# a version number npm will never let you reuse, even after unpublish.
+#
+# Deliberately not "v[0-9]+.[0-9]+.[0-9]+*". GitHub's tag filters are its own
+# syntax rather than plain glob, and whether "+" means "one or more of the
+# preceding character" or a literal plus decides whether that pattern matches
+# v0.1.0 at all. This one is correct under either reading. Precision is not
+# lost: the guard step below compares the tag to package.json exactly.
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
+      - "v[0-9]*"
 
 jobs:
   publish:
@@ -10,39 +22,53 @@ jobs:
     permissions:
       contents: read
       # OIDC trusted publishing (https://docs.npmjs.com/trusted-publishers) —
-      # no NPM_TOKEN needed. npm tightened restrictions on long-lived
-      # automation tokens in 2026, and this is the replacement: npm exchanges
-      # a short-lived, workflow-specific OIDC token for a publish token on
-      # every run, nothing to rotate or leak. Requires npm CLI >= 11.5.1 and
-      # Node >= 22.14.0 in this job specifically (the package's own
-      # engines.node >=20.0.0 is unrelated — that's the minimum for people
-      # *running* the published server, not for publishing it).
+      # no NPM_TOKEN anywhere. npm exchanges a short-lived, workflow-specific
+      # OIDC token for a publish credential on each run, so there is nothing to
+      # rotate and nothing that keeps working if it leaks. Requires npm CLI
+      # >= 11.5.1 and Node >= 22.14.0 *in this job* — unrelated to the
+      # package's own engines.node, which is the minimum for consumers.
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-          cache: "npm"
+          # No dependency cache on purpose. npm's own guidance is to never
+          # cache in a release build: a poisoned or merely stale cache entry
+          # would be baked into a published artifact that people then install,
+          # and the few seconds saved are not worth that.
+
+      # Fails before anything is installed or built, because this is the check
+      # most likely to catch a mistake and the cheapest one to run. The tag must
+      # be "v" + package.json's version exactly (v0.1.0 for "0.1.0"). npm does
+      # not enforce this; publishing the wrong version because a tag was cut
+      # against the wrong commit is unrecoverable.
+      - name: Tag matches package.json version
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ "$PKG_VERSION" != "$TAG_NAME" ]; then
+            echo "::error::Tag $TAG_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      # `npm ci` not `npm install` — installs the lockfile exactly, so what is
+      # published is built from the dependency tree that was reviewed, not
+      # whatever resolved on the day of the release.
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      # Tag must be "v" + package.json's version exactly, e.g. tag v0.1.0 for
-      # version "0.1.0" — this is just a sanity check, not something npm
-      # itself enforces, but publishing the wrong version because a tag was
-      # cut against the wrong commit is an easy, unrecoverable mistake, so
-      # fail fast instead.
-      - run: |
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          if [ "$PKG_VERSION" != "$TAG_NAME" ]; then
-            echo "Tag $TAG_NAME does not match package.json version $PKG_VERSION"
-            exit 1
-          fi
-      # No token in env — npm CLI auto-detects the OIDC environment here and
-      # authenticates via the trusted publisher configured on npmjs.com (see
-      # RELEASING.md). Also generates a provenance attestation automatically,
-      # since this is a public repo publishing a public package.
+
+      # No NODE_AUTH_TOKEN — the npm CLI detects the OIDC environment and
+      # authenticates against the trusted publisher configured on npmjs.com
+      # (see RELEASING.md). Provenance attestations are generated automatically
+      # for a public package from a public repo; no --provenance flag needed.
+      #
+      # `prepublishOnly` re-runs typecheck/build/test here. That is intentional
+      # duplication: the explicit steps above give a readable failure in the CI
+      # log, while the hook is what protects a manual `npm publish` run from a
+      # laptop, where there is no CI to catch anything.
       - run: npm publish --access public

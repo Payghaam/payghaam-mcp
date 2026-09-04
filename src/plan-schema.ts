@@ -27,6 +27,7 @@ you never position nodes or wire edges yourself.
 \`\`\`
 
 \`Duration\` is a string: "30m", "6h", "2d", "1w".
+\`ClockTime\` is a 24-hour local time: "09:00", "17:30".
 
 ## Steps
 
@@ -55,7 +56,13 @@ This is the step you want for "someone is stuck".
 **send** — send one message and move on.
 
 \`\`\`ts
-{ kind: "send"; channel: "PUSH" | "EMAIL" | "SMS"; content: {...}; label?: string }
+{
+  kind: "send";
+  channel: "PUSH" | "EMAIL" | "SMS";
+  content: {...};
+  label?: string;
+  ref?: string;               // name it so a later branch can ask if it was opened
+}
 \`\`\`
 
 **wait** — pause for a fixed duration.
@@ -63,6 +70,48 @@ This is the step you want for "someone is stuck".
 \`\`\`ts
 { kind: "wait"; duration: Duration; label?: string }
 \`\`\`
+
+**time_window** — hold users until the clock *where they live* is inside the window.
+
+\`\`\`ts
+{
+  kind: "time_window";
+  days: ("sun"|"mon"|"tue"|"wed"|"thu"|"fri"|"sat")[];   // at least one
+  start: ClockTime;           // inclusive
+  end: ClockTime;             // exclusive, must be after start
+  timezone?: string;          // IANA zone for users with none on file
+  label?: string;
+}
+\`\`\`
+
+This is not the same as \`wait\`. A wait is relative — "three days from now" lands
+at 3am as readily as at noon. A time window is absolute against the user's own
+day, and it is the only way to express "never wake anyone at 4am". Put one
+directly before a \`send\` when the message has a sensible hour.
+
+A window cannot cross midnight. Set \`timezone\` unless the audience really is
+global — users with no zone on file are otherwise treated as UTC.
+
+**split** — divide users between paths to test variants or hold a control group back.
+
+\`\`\`ts
+{
+  kind: "split";
+  label?: string;
+  paths: {                    // note: "paths", not "arms" — a branch has arms
+    weight: number;           // relative share, > 0; 50/50 and 1/1 are the same
+    variant?: string;         // reporting label — "control", "variant-a"
+    label?: string;
+    steps: Step[];
+  }[];                        // at least two
+}
+\`\`\`
+
+Paths rejoin whatever follows, and there is no \`otherwise\` — every user lands on
+one. Which one is a stable function of the user and this node, so a user is
+never moved mid-experiment. Give every path a \`variant\` if you want the results
+grouped by name rather than by percentage. A holdout is just a path whose steps
+skip the message.
 
 **branch** — route down one of several paths; arms rejoin whatever follows.
 
@@ -74,13 +123,34 @@ This is the step you want for "someone is stuck".
     when: { type: "segment"; segmentId: string }
         | { type: "tag"; tagKey: string;
             operator: "eq"|"neq"|"gt"|"lt"|"gte"|"lte"|"contains"|"exists";
-            value?: unknown };
+            value?: unknown }
+        | { type: "message_engagement"; ref: string;
+            engagement: "delivered"|"opened"|"clicked"; negate?: boolean };
     label?: string;
     steps: Step[];
   }[];
   otherwise?: Step[];         // omit to fall straight through
 }
 \`\`\`
+
+\`message_engagement\` asks about a specific earlier message by its \`ref\`. Give
+the send a \`ref\`, then name it: \`{ "type": "message_engagement", "ref": "welcome",
+"engagement": "opened", "negate": true }\` is "everyone who didn't open the
+welcome push". \`delivered\` means the device confirmed receipt, not that the
+provider accepted it.
+
+The ref must belong to a send **earlier on the same path**. A ref defined inside
+one branch arm is not visible from a sibling arm — those users never got that
+message — and the plan is rejected rather than compiled into a branch that can
+never be true.
+
+Put a \`wait\` between the send and the branch. The message has not been delivered
+at the instant the send step finishes, so a branch placed immediately after it
+finds nobody has opened anything and sends every user down the same arm. The
+plan is rejected if you forget.
+
+Careful with \`negate\` on a nudge that not everyone reaches: "did not open" is
+also true for a user who was never sent it.
 
 **set_tag** — \`{ kind: "set_tag"; tagKey: string; tagValue: unknown; label?: string }\`
 
@@ -118,6 +188,85 @@ This is the step you want for "someone is stuck".
     }
   ]
 }
+\`\`\`
+
+## Example: a subject-line test that respects business hours
+
+Ten percent are held back entirely, so the lift is measured against people who
+got nothing rather than against the other variant.
+
+\`\`\`json
+{
+  "name": "Onboarding nudge test",
+  "entry": { "type": "event", "eventName": "signup" },
+  "reentry": { "mode": "once" },
+  "steps": [
+    { "kind": "wait", "duration": "1d" },
+    {
+      "kind": "time_window",
+      "label": "Business hours",
+      "days": ["sun", "mon", "tue", "wed", "thu"],
+      "start": "09:00",
+      "end": "17:00",
+      "timezone": "Asia/Qatar"
+    },
+    {
+      "kind": "split",
+      "label": "Subject line test",
+      "paths": [
+        {
+          "weight": 45,
+          "variant": "variant-a",
+          "steps": [
+            { "kind": "send", "ref": "nudge_a", "channel": "EMAIL",
+              "content": { "subject": "Your account is ready",
+                           "body": "Finish setting up to start sending." } }
+          ]
+        },
+        {
+          "weight": 45,
+          "variant": "variant-b",
+          "steps": [
+            { "kind": "send", "ref": "nudge_b", "channel": "EMAIL",
+              "content": { "subject": "One step left",
+                           "body": "Finish setting up to start sending." } }
+          ]
+        },
+        {
+          "weight": 10,
+          "variant": "holdout",
+          "steps": [{ "kind": "exit", "label": "Holdout — no message" }]
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+Note that \`nudge_a\` is only visible inside its own path. A branch after the split
+cannot ask whether it was opened, because most users at that point were never
+sent it. To follow up on non-openers, put the wait and the branch *inside* the
+path, after the send:
+
+\`\`\`json
+"steps": [
+  { "kind": "send", "ref": "nudge_a", "channel": "EMAIL", "content": { "…": "…" } },
+  { "kind": "wait", "duration": "2d" },
+  {
+    "kind": "branch",
+    "arms": [
+      {
+        "when": { "type": "message_engagement", "ref": "nudge_a",
+                  "engagement": "opened", "negate": true },
+        "label": "Didn't open",
+        "steps": [
+          { "kind": "send", "channel": "PUSH",
+            "content": { "title": "Still there?", "body": "Your setup is waiting." } }
+        ]
+      }
+    ]
+  }
+]
 \`\`\`
 
 ## Before you draft

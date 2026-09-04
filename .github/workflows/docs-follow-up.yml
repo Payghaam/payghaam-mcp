@@ -1,0 +1,70 @@
+# Docs follow-up — MCP server. Product docs: Payghaam/payghaam-mono.
+
+name: Docs follow-up
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+concurrency:
+  group: docs-follow-up-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Comment if dashboard docs likely lag
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          FILES="$(git diff --name-only "${BASE}...${HEAD}" || true)"
+          echo "$FILES"
+          if [ -z "$FILES" ]; then exit 0; fi
+          DOCS=https://github.com/Payghaam/payghaam-mono/blob/main/apps/dashboard/app/(docs)/docs
+          BODY="$(cat <<EOF
+          <!-- docs-follow-up-bot -->
+          ## Docs follow-up
+
+          These MCP package changes may need a matching update in **payghaam-mono**:
+
+          - [Getting started]($DOCS/getting-started/page.tsx)
+
+          payghaam-mono polls this public repo weekly (or set \`DOCS_DISPATCH_TOKEN\` to ping on merge).
+          EOF
+          )"
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq '[.[] | select(.body | contains("docs-follow-up-bot")) | .id] | first // empty')"
+          if [ -n "${EXISTING:-}" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" -f body="$BODY"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -f body="$BODY"
+          fi
+
+  ping-mono:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify payghaam-mono
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then echo "No DOCS_DISPATCH_TOKEN — weekly poll will pick this up."; exit 0; fi
+          gh api repos/Payghaam/payghaam-mono/dispatches --input - <<EOF
+          {"event_type":"sdk-docs","client_payload":{"repo":"${GITHUB_REPOSITORY}","sha":"${GITHUB_SHA}","ref":"${GITHUB_REF_NAME}"}}
+          EOF
