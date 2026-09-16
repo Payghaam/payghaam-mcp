@@ -16,6 +16,23 @@ export interface EventReadiness {
   status: "OBSERVED" | "DECLARED" | "EXPECTED";
   count: number;
   lastSeenAt: string | null;
+  /**
+   * Keys a journey filters on that have never arrived on this event.
+   *
+   * The second way to be un-instrumented, and the quieter one: status is
+   * OBSERVED because the event itself shows up, but a filter reading a key
+   * that never does declines every one of them, so users park at a step that
+   * looks healthy. Optional because an older API will not send it.
+   */
+  missingProperties?: string[];
+}
+
+/** One property key the app already sends, and the type it arrives as. */
+export interface EventProperty {
+  eventName: string;
+  key: string;
+  type: "STRING" | "NUMBER" | "BOOLEAN" | "DATE";
+  lastSeenAt: string | null;
 }
 
 export interface ExpectedEvent extends EventReadiness {
@@ -108,6 +125,11 @@ export class PayghaamClient {
     events?: string[];
   }): Promise<GeneratedConstants> {
     return this.request<GeneratedConstants>("POST", "/mcp/events/constants", body);
+  }
+
+  properties(eventName?: string): Promise<EventProperty[]> {
+    const query = eventName ? `?eventName=${encodeURIComponent(eventName)}` : "";
+    return this.request<EventProperty[]>("GET", `/mcp/events/properties${query}`);
   }
 
   declare(events: string[]): Promise<EventReadiness[]> {

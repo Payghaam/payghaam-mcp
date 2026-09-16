@@ -16,7 +16,7 @@ you never position nodes or wire edges yourself.
 {
   name: string;
   description?: string;
-  entry: { type: "event"; eventName: string }
+  entry: { type: "event"; eventName: string; propertyFilter?: PropertyFilter }
        | { type: "segment"; includeSegmentIds: string[] }
        | { type: "any" }
        | { type: "api" };
@@ -28,6 +28,44 @@ you never position nodes or wire edges yourself.
 
 \`Duration\` is a string: "30m", "6h", "2d", "1w".
 \`ClockTime\` is a 24-hour local time: "09:00", "17:30".
+
+## Filtering an event by what it carried
+
+"purchase" and "purchase over 100" are the same event to the engine. The
+difference is a \`propertyFilter\`, allowed on \`entry\` and on any
+\`await_milestone\`.
+
+\`\`\`ts
+type PropertyFilter =
+  | { all: Condition[] }    // every condition must match
+  | { any: Condition[] };   // at least one must match
+
+type Condition = { fact: string; operator: Operator; value: unknown }
+               | PropertyFilter;   // groups nest
+
+type Operator =
+  | "equal" | "notEqual"
+  | "greaterThan" | "greaterThanInclusive"
+  | "lessThan" | "lessThanInclusive"
+  | "contains" | "doesNotContain"
+  | "in" | "notIn";
+\`\`\`
+
+\`\`\`json
+{ "all": [{ "fact": "total", "operator": "greaterThan", "value": 100 }] }
+\`\`\`
+
+\`fact\` is the event property key. **Call \`list_event_properties\` first.** Two
+ways a filter silently does nothing, and neither raises an error:
+
+- **The key never arrives.** The filter then turns away every event, and the
+  journey enrols nobody while its readiness still reads OBSERVED.
+- **The type is wrong.** Comparison is strict, so \`100\` does not match
+  \`"100"\`. \`list_event_properties\` reports the type each key arrives as.
+
+An operator outside the list above is rejected when the plan is parsed — which
+is deliberate, because at run time an unusable filter is treated as *no* filter,
+so a typo there would widen the journey rather than narrow it.
 
 ## Steps
 
@@ -46,12 +84,17 @@ This is the step you want for "someone is stuck".
     label?: string;
   }[];                        // [] = wait forever with no reminders
   onExhausted: "continue" | "exit";   // after the last nudge elapses
+  propertyFilter?: PropertyFilter;    // only count the event when it matches
 }
 \`\`\`
 
 \`at\` times are measured from the start of the step and must increase. "Nudge at
 2 days, again at 5" is \`["2d", "5d"]\` — not \`["2d", "3d"]\`. Anyone who fires
 \`event\` leaves the step immediately, so you never wire the success path yourself.
+
+With a \`propertyFilter\`, only a matching event releases them — "wait for a
+payment over 100" rather than "wait for any payment". Without one, any event of
+that name advances the user.
 
 **send** — send one message and move on.
 

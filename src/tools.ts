@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   PayghaamApiError,
+  type EventProperty,
   type EventReadiness,
   type PayghaamClient,
   type Platform,
@@ -98,13 +99,51 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
         return events
           .map((event) => {
             const journeys = event.neededBy.map((j) => j.journeyName).join(", ");
+            /*
+             * An arriving event with a missing property is a different job from
+             * a missing event, and saying "not in the code anywhere" about one
+             * sends the agent to add a tracking call that already exists. What
+             * it needs is one more field on the call that is already there.
+             */
             const state =
-              event.status === "DECLARED"
-                ? "already added to the code, but nothing has arrived yet — the build may not have shipped"
-                : "not in the code anywhere";
+              event.status === "OBSERVED"
+                ? `arriving, but without ${event.missingProperties?.join(", ")} — a journey filters on ${
+                    (event.missingProperties?.length ?? 0) === 1 ? "that property" : "those properties"
+                  }, so every one of these events is turned away. Add ${
+                    (event.missingProperties?.length ?? 0) === 1 ? "it" : "them"
+                  } to the existing call; do not add a new event`
+                : event.status === "DECLARED"
+                  ? "already added to the code, but nothing has arrived yet — the build may not have shipped"
+                  : "not in the code anywhere";
             return `${event.name}\n  needed by: ${journeys || "no active journey"}\n  status: ${state}`;
           })
           .join("\n\n");
+      }),
+  );
+
+  server.registerTool(
+    "list_event_properties",
+    {
+      title: "List event properties the app already sends",
+      description:
+        "The property keys this project's events actually carry, and the type each arrives as. Use this when a journey needs a property it is not getting, to see what the event does send today and what the key should be called. Types matter as much as names: the journey engine compares strictly, so a number sent as a string is a filter that never matches and never errors.",
+      inputSchema: {
+        eventName: z
+          .string()
+          .optional()
+          .describe("Narrow to one event. Omit for every event in the project."),
+      },
+      annotations: READS,
+    },
+    async ({ eventName }) =>
+      run(async () => {
+        const properties = await client.properties(eventName);
+        if (properties.length === 0) {
+          return eventName
+            ? `No properties have been seen on "${eventName}" yet. Either the event carries none, or it has not arrived since the project started cataloguing them.`
+            : "No event properties have been catalogued for this project yet.";
+        }
+        return formatProperties(properties);
       }),
   );
 
@@ -281,6 +320,11 @@ function formatReadiness(events: EventReadiness[]): string {
     .map((event) => {
       switch (event.status) {
         case "OBSERVED":
+          if (event.missingProperties?.length) {
+            // Arriving is not the same as working. Reporting only the count
+            // here is what let a dead journey read as fully instrumented.
+            return `  ${event.name} — arriving (${event.count.toLocaleString()}), but never carries ${event.missingProperties.join(", ")}, which a journey filters on — the filter turns every one away`;
+          }
           return `  ${event.name} — arriving (${event.count.toLocaleString()} in the last 90 days)`;
         case "DECLARED":
           return `  ${event.name} — in the code, nothing received yet`;
@@ -308,4 +352,20 @@ async function run(fn: () => Promise<string>): Promise<ToolResult> {
       err instanceof PayghaamApiError ? err.message : `Unexpected failure: ${String(err)}`;
     return { content: [{ type: "text", text: message }], isError: true };
   }
+}
+
+/** Grouped by event, because a key only means something on the event it rides. */
+function formatProperties(properties: EventProperty[]): string {
+  const byEvent = new Map<string, EventProperty[]>();
+  for (const property of properties) {
+    byEvent.set(property.eventName, [...(byEvent.get(property.eventName) ?? []), property]);
+  }
+  return [...byEvent]
+    .map(
+      ([eventName, props]) =>
+        `${eventName}\n${props
+          .map((p) => `  ${p.key}: ${p.type.toLowerCase()}`)
+          .join("\n")}`,
+    )
+    .join("\n\n");
 }

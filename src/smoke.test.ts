@@ -26,6 +26,11 @@ interface RpcResponse {
  * A unit test on `registerTools` would pass even if the server never came up,
  * the shebang were mangled, or the SDK's ESM entry failed to resolve under
  * node16 — all failures that would only appear on a customer's machine.
+ *
+ * It spawns the *built* entry point, which is what makes it honest and is also
+ * its one trap: run without a build it tests the previous release and passes
+ * whatever src says. `pretest` builds for that reason — a tool added to src and
+ * missing from the compiled output looked green here until the build ran.
  */
 function callServer(messages: unknown[]): Promise<RpcResponse[]> {
   return new Promise((resolvePromise, reject) => {
@@ -79,6 +84,7 @@ describe("payghaam-mcp over stdio", () => {
       "describe_journey",
       "generate_event_constants",
       "get_project_context",
+      "list_event_properties",
       "list_expected_events",
       "list_journeys",
       "mark_events_declared",
@@ -105,6 +111,7 @@ describe("payghaam-mcp over stdio", () => {
     const byName = new Map(tools.map((t) => [t.name, t.annotations]));
 
     for (const name of [
+      "list_event_properties",
       "list_expected_events",
       "list_journeys",
       "describe_journey",
