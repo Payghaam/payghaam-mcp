@@ -1,6 +1,6 @@
 {
   "name": "@payghaam/mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server exposing Payghaam journeys and the events they need, so a coding agent can instrument your app.",
   "license": "MIT",
   "author": "Payghaam <dev@payghaam.com>",
