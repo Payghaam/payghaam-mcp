@@ -7,7 +7,8 @@
  */
 
 export interface ClientOptions {
-  apiKey: string;
+  apiKey?: string;
+  accessToken?: string;
   baseUrl: string;
 }
 
@@ -92,11 +93,16 @@ export class PayghaamApiError extends Error {
 }
 
 export class PayghaamClient {
-  private readonly apiKey: string;
+  private readonly apiKey?: string;
+  private readonly accessToken?: string;
   private readonly baseUrl: string;
 
   constructor(options: ClientOptions) {
+    if (!options.apiKey && !options.accessToken) {
+      throw new Error("PayghaamClient requires either an apiKey or an accessToken.");
+    }
     this.apiKey = options.apiKey;
+    this.accessToken = options.accessToken;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
   }
 
@@ -141,15 +147,23 @@ export class PayghaamClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    } else if (this.apiKey) {
+      headers["x-api-key"] = this.apiKey;
+    }
+    if (body) {
+      headers["Content-Type"] = "application/json";
+    }
+
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: {
-          "x-api-key": this.apiKey,
-          Accept: "application/json",
-          ...(body ? { "Content-Type": "application/json" } : {}),
-        },
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (err) {
@@ -191,7 +205,7 @@ async function describeFailure(res: Response): Promise<string> {
   }
 
   if (res.status === 401) {
-    return "PAYGHAAM_API_KEY was rejected. Create an MCP key in the Payghaam dashboard under Project settings → Code.";
+    return "Authentication failed (token or key rejected). Run `npx @payghaam/mcp-server login` or create an MCP key in the Payghaam dashboard under Project settings → Code.";
   }
   if (res.status === 403) {
     return `${detail}\n\nRead tools need a key starting "ek_mcp_"; drafting journeys needs an author key starting "ek_mcpa_". Both are created in the Payghaam dashboard under Project settings → Code. Ask the developer to swap the key — you cannot widen it yourself.`;

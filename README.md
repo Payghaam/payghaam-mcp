@@ -10,9 +10,61 @@ Your code never leaves your machine. This server only reads journey and event me
 
 ## Setup
 
+You can authenticate either via **Browser OAuth (Recommended - zero keys in config files)** or with a static API key.
+
+### Option 1: Browser OAuth (Recommended)
+
+Run the login command in your terminal:
+
+```bash
+npx -y @payghaam/mcp-server login
+```
+
+This opens your browser to authorize your MCP client and select which Payghaam project to connect. Your credentials are securely cached in `~/.payghaam/credentials.json` with automatic token refresh.
+
+#### Cursor
+
+In `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "payghaam": {
+      "command": "npx",
+      "args": ["-y", "@payghaam/mcp-server"]
+    }
+  }
+}
+```
+
+#### Claude Desktop
+
+In `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "payghaam": {
+      "command": "npx",
+      "args": ["-y", "@payghaam/mcp-server"]
+    }
+  }
+}
+```
+
+#### Claude Code
+
+```bash
+claude mcp add payghaam -- npx -y @payghaam/mcp-server
+```
+
+---
+
+### Option 2: Static API Key
+
 Create an MCP key in the Payghaam dashboard under **Project settings → Code**. It starts with `ek_mcp_`.
 
-### Cursor
+#### Cursor
 
 In `.cursor/mcp.json`:
 
@@ -28,13 +80,11 @@ In `.cursor/mcp.json`:
 }
 ```
 
-### Claude Code
+#### Claude Code
 
 ```bash
 claude mcp add payghaam --env PAYGHAAM_API_KEY=ek_mcp_... -- npx -y @payghaam/mcp-server
 ```
-
-Both files tend to end up in git. An MCP key is read-mostly by design — it cannot send messages, enroll users, or read a single subscriber — but treat it as a secret anyway and revoke it from the dashboard if it leaks.
 
 ## Environment
 

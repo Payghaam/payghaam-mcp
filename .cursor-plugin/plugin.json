@@ -1,0 +1,32 @@
+{
+  "name": "payghaam",
+  "displayName": "Payghaam Journey Engagement",
+  "version": "0.2.0",
+  "description": "Exposes Payghaam journeys and missing analytics events so your coding agent can inspect and instrument your app with zero manual key management.",
+  "icon": "icon.png",
+  "author": {
+    "name": "Payghaam",
+    "email": "dev@payghaam.com",
+    "url": "https://payghaam.com"
+  },
+  "homepage": "https://github.com/Payghaam/payghaam-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Payghaam/payghaam-mcp"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "analytics",
+    "engagement",
+    "payghaam",
+    "journeys"
+  ],
+  "mcpServers": {
+    "payghaam": {
+      "command": "npx",
+      "args": ["-y", "@payghaam/mcp-server"]
+    }
+  }
+}
