@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.payghaam/payghaam-mcp",
+  "title": "Payghaam Journey Engagement",
+  "description": "Exposes Payghaam journeys and missing analytics events so coding agents can inspect and instrument your app with zero manual key management.",
+  "version": "0.3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Payghaam/payghaam-mcp"
+  },
+  "homepage": "https://github.com/Payghaam/payghaam-mcp#readme",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@payghaam/mcp-server",
+      "version": "0.3.0"
+    }
+  ],
+  "transport": {
+    "type": "stdio"
+  }
+}
