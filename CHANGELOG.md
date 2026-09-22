@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0
+## 0.3.0
 
 - Add OAuth 2.0 PKCE authentication (`payghaam-mcp login` and `payghaam-mcp logout`).
 - Auto-refresh access tokens from `~/.payghaam/credentials.json`.

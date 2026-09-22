@@ -1,7 +1,7 @@
 {
   "name": "payghaam",
   "displayName": "Payghaam Journey Engagement",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Exposes Payghaam journeys and missing analytics events so your coding agent can inspect and instrument your app with zero manual key management.",
   "icon": "icon.png",
   "author": {
