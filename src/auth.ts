@@ -138,8 +138,8 @@ export async function runLoginFlow(options: LoginOptions = {}): Promise<void> {
     "",
   );
 
-  // Default dashboard URL: infer localhost:3000 if apiUrl is localhost, else https://app.payghaam.com
-  let defaultDashboard = "https://app.payghaam.com";
+  // Default dashboard URL: infer localhost:3000 if apiUrl is localhost, else https://payghaam.com
+  let defaultDashboard = "https://payghaam.com";
   if (apiUrl.includes("localhost") || apiUrl.includes("127.0.0.1")) {
     defaultDashboard = "http://localhost:3000";
   }
