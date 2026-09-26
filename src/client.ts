@@ -47,7 +47,24 @@ export interface JourneySummary {
   events: string[];
 }
 
-export interface JourneyDescription {
+/**
+ * Journey-level settings, passed through as-is.
+ *
+ * Typed `unknown` rather than modeled field-by-field: the shape mirrors
+ * whatever `packages/shared/journey-dsl.ts` accepts on a plan's `entry`,
+ * `entryAudience`, `exitOn`, `reentry` and `schedule`, and duplicating that
+ * here would drift the moment either side changes. This client passes it
+ * straight through to the tool layer, which is where it becomes readable text.
+ */
+export interface JourneySettings {
+  entryTrigger?: unknown;
+  entryAudience?: unknown;
+  reentry?: unknown;
+  exitRule?: unknown;
+  schedule?: unknown;
+}
+
+export interface JourneyDescription extends JourneySettings {
   id: string;
   name: string;
   status: string;
@@ -57,7 +74,7 @@ export interface JourneyDescription {
   total: number;
 }
 
-export interface DraftedJourney {
+export interface DraftedJourney extends JourneySettings {
   id: string;
   name: string;
   status: string;
@@ -144,6 +161,19 @@ export class PayghaamClient {
 
   createDraft(plan: unknown): Promise<DraftedJourney> {
     return this.request<DraftedJourney>("POST", "/mcp/journeys", { plan });
+  }
+
+  /**
+   * Recompile a plan onto an existing journey. The server refuses (409) unless
+   * the journey is still DRAFT — an activated journey has run for real people,
+   * and is not reachable from this method at all.
+   */
+  updateDraft(journeyId: string, plan: unknown): Promise<DraftedJourney> {
+    return this.request<DraftedJourney>(
+      "PATCH",
+      `/mcp/journeys/${encodeURIComponent(journeyId)}`,
+      { plan },
+    );
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

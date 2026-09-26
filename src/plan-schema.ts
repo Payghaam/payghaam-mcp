@@ -20,14 +20,49 @@ you never position nodes or wire edges yourself.
        | { type: "segment"; includeSegmentIds: string[] }
        | { type: "any" }
        | { type: "api" };
-  exitOn?: { eventName?: string; segmentId?: string };
+  entryAudience?: {
+    includeSegmentIds?: string[];   // must match at least one
+    excludeSegmentIds?: string[];   // must match none
+    futureOnly?: boolean;           // only enroll going forward, no backfill
+  };
+  exitOn?: { eventName?: string; segmentId?: string; propertyFilter?: PropertyFilter };
   reentry?: { mode: "once" } | { mode: "after"; after: Duration };
+  schedule?: { startAt?: string; endAt?: string };   // ISO datetimes
   steps: Step[];
 }
 \`\`\`
 
 \`Duration\` is a string: "30m", "6h", "2d", "1w".
 \`ClockTime\` is a 24-hour local time: "09:00", "17:30".
+
+## Audience, exit filtering, and the activation window
+
+\`entryAudience\` is independent of \`entry\` — they answer different questions.
+\`entry\` says *what triggers enrollment* (an event, segment membership, anything,
+or an API call); \`entryAudience\` says *who is additionally allowed in*. An
+event-triggered journey can still require segment membership:
+
+\`\`\`json
+{
+  "entry": { "type": "event", "eventName": "top_up_started" },
+  "entryAudience": { "includeSegmentIds": ["seg_new_users"] }
+}
+\`\`\`
+
+\`exitOn.propertyFilter\` narrows an exit condition the same way \`entry\` and
+\`await_milestone\` do — "eject on refund, but only over 100":
+
+\`\`\`json
+{ "exitOn": { "eventName": "refund", "propertyFilter": { "all": [{ "fact": "amount", "operator": "greaterThan", "value": 100 }] } } }
+\`\`\`
+
+\`schedule\` bounds when the journey is live at all, independent of when a person
+activates it in the dashboard — omit both to run immediately with no end,
+which is the default:
+
+\`\`\`json
+{ "schedule": { "startAt": "2027-01-01T00:00:00.000Z", "endAt": "2027-02-01T00:00:00.000Z" } }
+\`\`\`
 
 ## Filtering an event by what it carried
 
@@ -176,6 +211,31 @@ skip the message.
 }
 \`\`\`
 
+A tag condition's \`value\` accepts a merge field, not just a literal — \`{{
+event.x }}\` resolves against the event that advanced the journey to this
+branch, \`{{ tag.x }}\` against another tag on the same subscriber. This is how
+"only if this changed since last time" is expressed: store the last-seen value
+in a \`set_tag\` step, then branch on whether the new event disagrees with it.
+
+\`\`\`json
+{
+  "kind": "branch",
+  "arms": [
+    {
+      "when": { "type": "tag", "tagKey": "last_country", "operator": "neq", "value": "{{ event.country }}" },
+      "label": "Country changed (or first transaction)",
+      "steps": [
+        { "kind": "send", "channel": "PUSH", "content": { "title": "New country detected", "body": "..." } },
+        { "kind": "set_tag", "tagKey": "last_country", "tagValue": "{{ event.country }}" }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+An unset tag reads as \`undefined\`, so \`neq\` against any value is true the
+first time — no special-casing "first occurrence" separately.
+
 \`message_engagement\` asks about a specific earlier message by its \`ref\`. Give
 the send a \`ref\`, then name it: \`{ "type": "message_engagement", "ref": "welcome",
 "engagement": "opened", "negate": true }\` is "everyone who didn't open the
@@ -196,6 +256,10 @@ Careful with \`negate\` on a nudge that not everyone reaches: "did not open" is
 also true for a user who was never sent it.
 
 **set_tag** — \`{ kind: "set_tag"; tagKey: string; tagValue: unknown; label?: string }\`
+
+\`tagValue\` accepts the same merge fields as a tag condition's \`value\` —
+\`"{{ event.country }}"\` stores the triggering event's actual property, not the
+literal string.
 
 **exit** — \`{ kind: "exit"; label?: string }\`
 
@@ -322,4 +386,15 @@ someone has to review and activate it. Two things are worth checking first:
   is often exactly the users being targeted.
 - **Re-entry.** Without \`{ "mode": "once" }\`, a user who triggers the entry event
   five times enters five times and gets five sets of nudges.
+
+## Revising a draft
+
+Got something wrong, or want to add a step? Use \`update_journey_draft\` with
+the journey's id and a corrected plan — not \`create_journey_draft\` again,
+which would leave the broken one sitting alongside a second draft. It replaces
+the whole plan, not just the part you changed, so call \`describe_journey\`
+first and build the new plan from what it reports rather than guessing at
+what's already there. It only works while the journey is still DRAFT; once a
+person activates it, it has run for real people and this refuses rather than
+rewriting it out from under them.
 `;

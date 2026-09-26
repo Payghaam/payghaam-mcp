@@ -4,6 +4,7 @@ import {
   PayghaamApiError,
   type EventProperty,
   type EventReadiness,
+  type JourneySettings,
   type PayghaamClient,
   type Platform,
 } from "./client.js";
@@ -46,6 +47,20 @@ const DRAFT = {
   readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
+/**
+ * The opposite shape from `DRAFT`: this one only ever touches a journey that
+ * already exists, and it replaces its plan wholesale rather than layering
+ * something new on — so it is destructive (the previous plan is gone) but
+ * idempotent (submitting the same plan twice leaves the same result, unlike
+ * create making a second draft).
+ */
+const EDIT_DRAFT = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
   openWorldHint: false,
 } as const;
 
@@ -187,8 +202,15 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
           "What happens:",
           steps || "  (no steps)",
           "",
+          "Settings:",
+          formatSettings(journey),
+          "",
           `Events (${journey.ready}/${journey.total} arriving):`,
           formatReadiness(journey.events),
+          "",
+          journey.status === "DRAFT"
+            ? "This is a draft — update_journey_draft can revise it."
+            : "Not a draft, so update_journey_draft cannot touch it.",
         ].join("\n");
       }),
   );
@@ -265,7 +287,7 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
     {
       title: "Draft a journey",
       description:
-        "Create a DRAFT journey from a plan. Read the payghaam://journey-plan-schema resource first — it has the format and a worked example. The draft sends nothing; a person reviews and activates it in the dashboard, and it is labelled there as machine-written. Requires an author key (ek_mcpa_). If the plan is invalid you get the specific problems back and can fix and retry.",
+        "Create a DRAFT journey from a plan. Read the payghaam://journey-plan-schema resource first — it has the format and a worked example. The draft sends nothing; a person reviews and activates it in the dashboard, and it is labelled there as machine-written. Requires an author key (ek_mcpa_). If the plan is invalid you get the specific problems back and can fix and retry. To revise a draft you already created, use update_journey_draft instead of creating a second one.",
       inputSchema: {
         plan: z
           .record(z.unknown())
@@ -294,6 +316,40 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
   );
 
   server.registerTool(
+    "update_journey_draft",
+    {
+      title: "Revise a draft journey",
+      description:
+        "Recompile a plan onto a journey you already drafted, replacing its steps and settings entirely — this is not a partial patch, so the plan must be complete, not just the part you're changing. Call describe_journey first to see the current settings and steps, then submit the full plan with your changes. Only works while the journey is still DRAFT: once a person activates it in the dashboard, this refuses (409) rather than silently rewriting something already running for real users. Requires an author key (ek_mcpa_).",
+      inputSchema: {
+        journeyId: z.string().describe("From list_journeys or the id returned by create_journey_draft."),
+        plan: z
+          .record(z.unknown())
+          .describe("The complete, replacement journey plan object, per payghaam://journey-plan-schema."),
+      },
+      annotations: EDIT_DRAFT,
+    },
+    async ({ journeyId, plan }) =>
+      run(async () => {
+        const journey = await client.updateDraft(journeyId, plan);
+        return [
+          `Updated draft "${journey.name}" (${journey.id}).`,
+          "",
+          "What it does now:",
+          journey.steps.map((s, i) => `  ${i + 1}. ${s.detail}`).join("\n") || "  (no steps)",
+          "",
+          journey.warnings.length ? `Warnings:\n${journey.warnings.map((w) => `  - ${w}`).join("\n")}\n` : "",
+          "Events it depends on:",
+          formatReadiness(journey.events),
+          "",
+          "Still a draft — nothing sends until someone activates it in the dashboard.",
+        ]
+          .filter((line) => line !== "")
+          .join("\n");
+      }),
+  );
+
+  server.registerTool(
     "get_project_context",
     {
       title: "Project overview",
@@ -312,6 +368,29 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
         ].join("\n");
       }),
   );
+}
+
+/**
+ * The settings a plan controls beyond its steps — entry audience, exit
+ * condition, re-entry, activation window — printed as raw JSON.
+ *
+ * Deliberately not prose like `formatReadiness`: these are exactly the fields
+ * `update_journey_draft` needs echoed back verbatim so the plan it submits can
+ * reuse them, and paraphrasing here risks the agent writing back something
+ * subtly different from what is actually stored.
+ */
+function formatSettings(journey: JourneySettings): string {
+  const lines: string[] = [];
+  if (journey.entryTrigger !== undefined) {
+    lines.push(`entry: ${JSON.stringify(journey.entryTrigger)}`);
+  }
+  if (journey.entryAudience) lines.push(`entryAudience: ${JSON.stringify(journey.entryAudience)}`);
+  if (journey.exitRule) lines.push(`exitOn (compiled as exitRule): ${JSON.stringify(journey.exitRule)}`);
+  if (journey.reentry) lines.push(`reentry: ${JSON.stringify(journey.reentry)}`);
+  if (journey.schedule) lines.push(`schedule: ${JSON.stringify(journey.schedule)}`);
+  return lines.length
+    ? lines.join("\n")
+    : "  (defaults: no audience restriction beyond the trigger, runs to completion, no re-entry, no activation window)";
 }
 
 function formatReadiness(events: EventReadiness[]): string {

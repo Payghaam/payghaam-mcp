@@ -88,6 +88,7 @@ describe("payghaam-mcp over stdio", () => {
       "list_expected_events",
       "list_journeys",
       "mark_events_declared",
+      "update_journey_draft",
     ]);
   }, 15_000);
 
@@ -135,6 +136,15 @@ describe("payghaam-mcp over stdio", () => {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
+    });
+
+    // The opposite shape: it overwrites an existing draft's plan wholesale
+    // (destructive), but submitting the same plan twice leaves the same
+    // result (idempotent) — unlike create, which would make a second draft.
+    expect(byName.get("update_journey_draft")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
     });
   }, 15_000);
 
