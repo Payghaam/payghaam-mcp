@@ -368,6 +368,477 @@ export function registerTools(server: McpServer, client: PayghaamClient): void {
         ].join("\n");
       }),
   );
+
+  // ── Extended Copilot Tools: Overview, Channels, Webhooks, Issues ──
+
+  server.registerTool(
+    "get_project_overview",
+    {
+      title: "Project overview and delivery metrics",
+      description:
+        "Delivery totals for the last 24h, rolling 30-day MAU, active campaigns, and open delivery or configuration issues.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "project_overview");
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "list_channels",
+    {
+      title: "List configured channels",
+      description:
+        "Channels configured for this project (EMAIL, PUSH, SMS, IN_APP, WEBHOOK) and whether each has active credentials/providers.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_channels");
+        const channels = (data.channels ?? {}) as Record<string, { enabled?: boolean; provider?: string }>;
+        const lines = Object.entries(channels).map(([ch, info]) => {
+          return `- **${ch}**: ${info?.enabled ? "Enabled" : "Disabled"}${info?.provider ? ` (provider: ${info.provider})` : ""}`;
+        });
+        return lines.length ? lines.join("\n") : "No channels configured.";
+      }),
+  );
+
+  server.registerTool(
+    "list_webhook_connections",
+    {
+      title: "List custom webhook integrations",
+      description: "Custom webhook integrations configured for this project.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_webhook_connections");
+        const connections = (data.connections ?? []) as Array<{ id: string; name: string; method: string; url: string }>;
+        if (!connections.length) return "No webhook connections configured.";
+        return connections.map((c) => `- ${c.name} (${c.method} ${c.url}) [id: ${c.id}]`).join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "list_issues",
+    {
+      title: "List open delivery and configuration issues",
+      description: "Open delivery and channel issues for this project — failed credentials, bounces, provider outages.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_issues");
+        const issues = (data.issues ?? []) as Array<{ id: string; title: string; severity: string; channel?: string; count: number }>;
+        if (!issues.length) return "No open issues found.";
+        return issues
+          .map((i) => `[${i.severity}] ${i.title}${i.channel ? ` (channel: ${i.channel})` : ""} — count: ${i.count} (id: ${i.id})`)
+          .join("\n");
+      }),
+  );
+
+  // ── Campaigns ──
+
+  server.registerTool(
+    "list_campaigns",
+    {
+      title: "List campaigns",
+      description: "Campaigns in this project, newest first, with status, channel, and scheduled/sent times.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_campaigns");
+        const campaigns = (data.campaigns ?? []) as Array<{ id: string; name: string; channel: string; status: string; sentAt?: string }>;
+        if (!campaigns.length) return "No campaigns found.";
+        return campaigns
+          .map((c) => `- **${c.name}** [${c.status}] (${c.channel}) — id: ${c.id}${c.sentAt ? ` (sent: ${c.sentAt})` : ""}`)
+          .join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "get_campaign_analytics",
+    {
+      title: "Get campaign analytics",
+      description: "Send / deliver / open / click / fail counts and rates for one campaign.",
+      inputSchema: {
+        campaignId: z.string().describe("The ID of the campaign to inspect"),
+      },
+      annotations: READS,
+    },
+    async ({ campaignId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "campaign_analytics", { campaignId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "propose_campaign",
+    {
+      title: "Preview / propose a one-shot campaign",
+      description: "Preview a one-shot campaign without saving. Checks channels and reports audience size.",
+      inputSchema: {
+        plan: z.record(z.unknown()).describe("Campaign plan containing name, channel (EMAIL, PUSH, SMS), content, and audience"),
+      },
+      annotations: READS,
+    },
+    async ({ plan }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "propose_campaign", { plan });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "save_campaign_draft",
+    {
+      title: "Save a campaign as DRAFT",
+      description: "Save a campaign as DRAFT. It sends nothing. Sending is confirmed in dashboard. Requires an author key (ek_mcpa_) or REST key.",
+      inputSchema: {
+        plan: z.record(z.unknown()).describe("Campaign plan object"),
+      },
+      annotations: DRAFT,
+    },
+    async ({ plan }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "save_campaign", { plan });
+        return `Campaign draft saved: ID ${data.campaignId} (status: ${data.status})`;
+      }),
+  );
+
+  // ── Templates ──
+
+  server.registerTool(
+    "list_email_templates",
+    {
+      title: "List email templates",
+      description: "Designed email templates defined in this project.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_email_templates");
+        const templates = (data.templates ?? []) as Array<{ id: string; name: string; subject?: string; updatedAt?: string }>;
+        if (!templates.length) return "No email templates found.";
+        return templates.map((t) => `- **${t.name}** [id: ${t.id}]${t.subject ? ` — Subject: "${t.subject}"` : ""}`).join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "get_email_template",
+    {
+      title: "Get email template detail",
+      description: "Retrieve an email template by ID, including its outline and design blocks.",
+      inputSchema: {
+        templateId: z.string().describe("The template ID from list_email_templates"),
+      },
+      annotations: READS,
+    },
+    async ({ templateId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "get_email_template", { templateId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "propose_email_template",
+    {
+      title: "Preview / propose changes to an email template",
+      description: "Compile and preview email template changes without saving.",
+      inputSchema: {
+        name: z.string().describe("Template name"),
+        subject: z.string().describe("Email subject line"),
+        preheader: z.string().optional().describe("Preview text snippet"),
+        doc: z.record(z.unknown()).describe("Waypoint email template document JSON"),
+        templateId: z.string().optional().describe("Existing template ID if revising"),
+      },
+      annotations: READS,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "propose_email_template", args);
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "save_email_template",
+    {
+      title: "Save an email template",
+      description: "Create or update an email template. Requires an author key (ek_mcpa_) or REST key.",
+      inputSchema: {
+        name: z.string().describe("Template name"),
+        subject: z.string().describe("Email subject line"),
+        preheader: z.string().optional().describe("Preview text snippet"),
+        doc: z.record(z.unknown()).describe("Waypoint email template document JSON"),
+        templateId: z.string().optional().describe("Existing template ID if updating"),
+      },
+      annotations: DRAFT,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "save_email_template", args);
+        return `Email template saved: ID ${data.templateId}`;
+      }),
+  );
+
+  server.registerTool(
+    "list_message_templates",
+    {
+      title: "List push/SMS message templates",
+      description: "Designed push and SMS message templates in this project.",
+      inputSchema: {
+        channel: z.enum(["PUSH", "SMS"]).optional().describe("Filter by channel (PUSH or SMS)"),
+      },
+      annotations: READS,
+    },
+    async ({ channel }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_message_templates", channel ? { channel } : {});
+        const templates = (data.templates ?? []) as Array<{ id: string; name: string; channel: string; content?: { title?: string; body: string } }>;
+        if (!templates.length) return "No message templates found.";
+        return templates
+          .map((t) => `- **${t.name}** (${t.channel}) [id: ${t.id}]${t.content?.body ? `: "${t.content.body.slice(0, 60)}..."` : ""}`)
+          .join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "get_message_template",
+    {
+      title: "Get push/SMS message template",
+      description: "Inspect a message template by ID.",
+      inputSchema: {
+        templateId: z.string().describe("The template ID"),
+      },
+      annotations: READS,
+    },
+    async ({ templateId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "get_message_template", { templateId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "propose_message_template",
+    {
+      title: "Preview / propose a message template",
+      description: "Preview push or SMS message template rendering with personalization fields.",
+      inputSchema: {
+        name: z.string(),
+        channel: z.enum(["PUSH", "SMS"]),
+        content: z.object({
+          title: z.string().optional(),
+          body: z.string(),
+          url: z.string().optional(),
+        }),
+        templateId: z.string().optional(),
+      },
+      annotations: READS,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "propose_message_template", args);
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "save_message_template",
+    {
+      title: "Save a push/SMS message template",
+      description: "Create or update a push/SMS message template. Requires an author key (ek_mcpa_) or REST key.",
+      inputSchema: {
+        name: z.string(),
+        channel: z.enum(["PUSH", "SMS"]),
+        content: z.object({
+          title: z.string().optional(),
+          body: z.string(),
+          url: z.string().optional(),
+        }),
+        templateId: z.string().optional(),
+      },
+      annotations: DRAFT,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "save_message_template", args);
+        return `Message template saved: ID ${data.templateId} (${data.name}, ${data.channel})`;
+      }),
+  );
+
+  // ── Deliveries ──
+
+  server.registerTool(
+    "list_recent_deliveries",
+    {
+      title: "List recent deliveries",
+      description: "Recent message delivery attempts with status, channel, and error hints.",
+      inputSchema: {
+        subscriberId: z.string().optional().describe("Filter by subscriber ID"),
+        status: z.enum(["QUEUED", "SENT", "DELIVERED", "OPENED", "CLICKED", "FAILED", "BOUNCED", "UNSUBSCRIBED"]).optional(),
+      },
+      annotations: READS,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_recent_deliveries", args);
+        const items = (data.items ?? []) as Array<{ id: string; status: string; channel: string; messageTitle?: string; error?: string; hint?: string }>;
+        if (!items.length) return "No deliveries found.";
+        return items
+          .map((d) => `- [${d.status}] ${d.channel}: ${d.messageTitle ?? "Message"} (id: ${d.id})${d.hint ? ` — Hint: ${d.hint}` : ""}`)
+          .join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "explain_delivery",
+    {
+      title: "Explain delivery failure or status",
+      description: "Timeline and actionable diagnosis for why a specific message delivery failed, bounced, or is queued.",
+      inputSchema: {
+        deliveryId: z.string().describe("The delivery ID"),
+      },
+      annotations: READS,
+    },
+    async ({ deliveryId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "explain_delivery", { deliveryId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  // ── Audience, Subscribers & Subscriptions ──
+
+  server.registerTool(
+    "get_subscriber",
+    {
+      title: "Inspect subscriber profile",
+      description: "Look up a subscriber by email, phone, externalId, or subscriber ID to view attributes and channels.",
+      inputSchema: {
+        query: z.string().describe("Email, phone, externalId, or subscriber ID to find"),
+      },
+      annotations: READS,
+    },
+    async ({ query }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "get_subscriber", { query });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "list_segments",
+    {
+      title: "List audience segments",
+      description: "Audience segments defined in this project. Use returned IDs for campaign or journey audience targeting.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_segments");
+        const segments = (data.segments ?? []) as Array<{ id: string; name: string }>;
+        if (!segments.length) return "No audience segments defined.";
+        return segments.map((s) => `- **${s.name}** [id: ${s.id}]`).join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "list_subscriptions",
+    {
+      title: "List subscriptions",
+      description: "Subscriptions in this project (channels and device push tokens). Filter by type (EMAIL, SMS, IOS_PUSH, ANDROID_PUSH, WEB_PUSH) or search by subscriber/token/externalId.",
+      inputSchema: {
+        type: z.string().optional().describe("Filter by subscription type: EMAIL, SMS, IOS_PUSH, ANDROID_PUSH, WEB_PUSH"),
+        search: z.string().optional().describe("Search text: subscription ID, external ID, email, or phone"),
+        limit: z.number().optional().describe("Max items to return (default 20, max 100)"),
+      },
+      annotations: READS,
+    },
+    async (args) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_subscriptions", args);
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "get_subscription",
+    {
+      title: "Get subscription details",
+      description: "Details for one subscription by ID: type, status, subscriber, and recent delivery attempts.",
+      inputSchema: {
+        subscriptionId: z.string().describe("The ID of the subscription"),
+      },
+      annotations: READS,
+    },
+    async ({ subscriptionId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "get_subscription", { subscriptionId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  // ── Journeys & Events Parity ──
+
+  server.registerTool(
+    "check_journey_readiness",
+    {
+      title: "Check journey readiness",
+      description: "Readiness check for a journey — verifies all needed events and properties are arriving.",
+      inputSchema: {
+        journeyId: z.string().describe("The journey ID"),
+      },
+      annotations: READS,
+    },
+    async ({ journeyId }) =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "check_journey_readiness", { journeyId });
+        return JSON.stringify(data, null, 2);
+      }),
+  );
+
+  server.registerTool(
+    "list_event_names",
+    {
+      title: "List received event names",
+      description: "Events this project has actually received in the last 90 days, most frequent first.",
+      inputSchema: {},
+      annotations: READS,
+    },
+    async () =>
+      run(async () => {
+        const data = await callToolOrThrow(client, "list_event_names");
+        const events = (data.events ?? []) as Array<{ name: string; count?: number; lastSeenAt?: string }>;
+        if (!events.length) return "No events received in the last 90 days.";
+        return events.map((e) => `- ${e.name}${e.count ? ` (${e.count.toLocaleString()} times)` : ""}`).join("\n");
+      }),
+  );
+}
+
+async function callToolOrThrow(
+  client: PayghaamClient,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const res = await client.callTool(name, args);
+  if (res.isError || !res.ok) {
+    throw new PayghaamApiError(400, res.message ?? "Tool execution failed");
+  }
+  return (res.data ?? {}) as Record<string, unknown>;
 }
 
 /**

@@ -176,6 +176,26 @@ export class PayghaamClient {
     );
   }
 
+  tools(): Promise<{ tools: any[] }> {
+    return this.request<{ tools: any[] }>("GET", "/mcp/tools");
+  }
+
+  callTool<T = Record<string, unknown>>(
+    name: string,
+    args: Record<string, unknown> = {},
+  ): Promise<{ ok: boolean; data?: T; ui?: unknown; message?: string; isError?: boolean }> {
+    return this.request<{
+      ok: boolean;
+      data?: T;
+      ui?: unknown;
+      message?: string;
+      isError?: boolean;
+    }>("POST", "/mcp/tools/call", {
+      name,
+      arguments: args,
+    });
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = {
       Accept: "application/json",
